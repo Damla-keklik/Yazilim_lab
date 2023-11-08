@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/">
+        <file>choose_icon.ico</file>
+        <file>circle_icon.ico</file>
+        <file>delete_icon.ico</file>
+        <file>ellipse_icon.ico</file>
+        <file>hexagon_icon.ico</file>
+        <file>line_icon.ico</file>
+        <file>rectangle_icon.ico</file>
+        <file>star_icon.ico</file>
+        <file>triangle_icon.ico</file>
+    </qresource>
+</RCC>
