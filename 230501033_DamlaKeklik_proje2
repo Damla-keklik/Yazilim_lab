@@ -1,0 +1,449 @@
+import sys
+from PyQt5.QtWidgets import QApplication, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox, QMessageBox,QInputDialog,QDialog,QTextBrowser
+import mysql.connector
+from mysql.connector import errorcode
+
+#Makale Listesi İletişim Kutusu
+class ArticleListDialog(QDialog):
+    def __init__(self, articles):
+        super().__init__()
+
+        self.setWindowTitle('Article List')
+        self.setGeometry(500, 300, 600, 400)
+
+        self.layout = QVBoxLayout()
+
+        self.text_browser = QTextBrowser()
+        self.text_browser.setPlainText(articles)
+
+        self.layout.addWidget(self.text_browser)
+        self.setLayout(self.layout)
+
+#Kayıt İletişim Kutusu
+class RegistrationDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle('Üye Ol')
+        self.setGeometry(550, 250, 800, 500)
+
+        self.label_username = QLabel('Kullanıcı Adı:')
+        self.label_password = QLabel('Şifre:')
+        self.label_user_type = QLabel('Kullanıcı Türü:')
+        self.edit_username = QLineEdit()
+        self.edit_password = QLineEdit()
+        self.edit_password.setEchoMode(QLineEdit.Password)
+
+        # Kullanıcı türünü seçmek için seçim kutusu ekledim
+        self.combo_user_type = QComboBox()
+        self.combo_user_type.addItems(['Yazar', 'Editor', 'Hakem'])
+
+        self.button_register = QPushButton('Üye Ol')
+        self.button_register.clicked.connect(self.register)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.label_username)
+        layout.addWidget(self.edit_username)
+        layout.addWidget(self.label_password)
+        layout.addWidget(self.edit_password)
+        layout.addWidget(self.label_user_type)
+        layout.addWidget(self.combo_user_type)
+        layout.addWidget(self.button_register)
+
+        self.setLayout(layout)
+
+    # kayıt olan kullanıcıyı veritabanına eklemeyi sağlayan metod
+    def register(self):
+        username = self.edit_username.text()
+        password = self.edit_password.text()
+        user_type = self.combo_user_type.currentText()
+
+        if not (username and password and user_type):
+            self.parent().show_message("Lütfen tüm alanları doldurun")
+            return
+        registration_query = "INSERT INTO kullanicilar (kullanici_adi, sifre, kullanici_turu) VALUES (%s, %s, %s);"
+        user_data = (username, password, user_type)
+
+        try:
+            parent = self.parent()
+            parent.cursor.execute(registration_query, user_data)
+            parent.cnx.commit()
+            parent.show_message("Üyelik başarıyla oluşturuldu.")
+        except mysql.connector.Error as err:
+            print("Üyelik oluşturma hatası:", err)
+            parent.show_message("Üyelik oluşturma sırasında bir hata oluştu.")
+
+        self.close()
+
+        #makale yönetim arayüzü
+class ArticleManagementGUI(QDialog):
+    def __init__(self):
+        super().__init__()
+
+        self.username = None
+        self.init_ui()
+        self.connect_to_database()
+
+    def init_ui(self):
+        self.setWindowTitle('Article Management System')
+        self.setGeometry(550, 250, 800, 500)
+
+        self.label_username = QLabel('Kullanıcı Adı:')
+        self.label_password = QLabel('Şifre:')
+        self.edit_username = QLineEdit()
+        self.edit_password = QLineEdit()
+        self.edit_password.setEchoMode(QLineEdit.Password)
+
+        self.button_login = QPushButton('Giriş Yap')
+        self.button_login.clicked.connect(self.login)
+
+        self.layout = QVBoxLayout()
+        self.layout.addWidget(self.label_username)
+        self.layout.addWidget(self.edit_username)
+        self.layout.addWidget(self.label_password)
+        self.layout.addWidget(self.edit_password)
+        self.layout.addWidget(self.button_login)
+
+        self.setLayout(self.layout)
+        # Kayıt için bir düğme ekleme
+        self.button_register = QPushButton('Üye Değil Misiniz?')
+        self.button_register.clicked.connect(self.register)
+        self.layout.addWidget(self.button_register)
+
+        self.setLayout(self.layout)
+
+# kayıt olmayı sağlayan metod
+    def register(self):
+        registration_dialog = RegistrationDialog(self)
+        registration_dialog.exec_()
+
+# veritabanına bağlanmayı sağlayan metod
+    def connect_to_database(self):
+        try:
+            self.cnx = mysql.connector.connect(user='root', password='548426', host='localhost', database='articles')
+            self.cursor = self.cnx.cursor()
+        except mysql.connector.Error as err:
+            if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+                print("Hata: Kullanıcı adı veya şifre hatalı.")
+            elif err.errno == errorcode.ER_BAD_DB_ERROR:
+                print("Hata: Veritabanı bulunamadı.")
+            else:
+                print(err)
+            sys.exit()
+
+#giriş yapmayı sağlayan metod
+    def login(self):
+        username = self.edit_username.text()
+        password = self.edit_password.text()
+
+        if not (username and password):
+            self.show_message('Kullanıcı adı ve şifre alanlarını doldurun.')
+            return
+
+        user_type = self.check_login(username, password)
+
+        if user_type:
+            if user_type == 'Yazar':
+                self.author_menu(username)
+            elif user_type == 'Editor':
+                self.editor_menu()
+            elif user_type == 'Hakem':
+                self.referee_menu()
+        else:
+            self.show_message('Hatalı kullanıcı adı veya şifre.')
+
+        self.username = self.edit_username.text()
+
+#giriş yapma işlemini kontrol eden metod
+    def check_login(self, username, password):
+        query = "SELECT kullanici_turu FROM kullanicilar WHERE kullanici_adi = %s AND sifre = %s;"
+        user_data = (username, password)
+
+        self.cursor.execute(query, user_data)
+        result = self.cursor.fetchone()
+
+        if result:
+            return result[0]
+        else:
+            return None
+
+#bilgi veya hata mesajlarını gösteren metod
+    def show_message(self, message):
+        QMessageBox.information(self, 'Bilgi', message)
+
+#yazar menüsü
+    def author_menu(self, username):
+        self.clear_layout()
+
+        label_welcome = QLabel(
+            f"Merhaba {username}! Yeni makale yüklemek veya eklediğiniz makaleleri görmek için aşağıdaki bilgileri kullanabilirsiniz:")
+        label_title = QLabel("Makale Başlığı:")
+        self.edit_title = QLineEdit()
+        label_author_names = QLabel("Yazar Adı ve Soyadı (virgülle ayrılmış):")
+        self.edit_author_names = QLineEdit()
+        label_author_email = QLabel("Yazarın E-Posta Adresi:")
+        self.edit_author_email = QLineEdit()
+        label_author_institution = QLabel("Yazarın Çalıştığı Kurum:")
+        self.edit_author_institution = QLineEdit()
+        label_content = QLabel("Makale İçeriği:")
+        self.edit_content = QTextEdit()
+
+        self.button_upload_article = QPushButton('Makale Ekle')
+        self.button_upload_article.clicked.connect(self.upload_article)
+
+        self.button_show_articles = QPushButton('Makaleleri Göster')
+        self.button_show_articles.clicked.connect(self.show_author_articles)
+
+        self.layout.addWidget(label_welcome)
+        self.layout.addWidget(label_title)
+        self.layout.addWidget(self.edit_title)
+        self.layout.addWidget(label_author_names)
+        self.layout.addWidget(self.edit_author_names)
+        self.layout.addWidget(label_author_email)
+        self.layout.addWidget(self.edit_author_email)
+        self.layout.addWidget(label_author_institution)
+        self.layout.addWidget(self.edit_author_institution)
+        self.layout.addWidget(label_content)
+        self.layout.addWidget(self.edit_content)
+        self.layout.addWidget(self.button_upload_article)
+        self.layout.addWidget(self.button_show_articles)
+
+#yazarın yüklediği makaleleri gösteren metod
+    def show_author_articles(self):
+        query = """
+        SELECT m.id, m.baslik, m.yazar_ad_soyad, m.makale_icerik, m.mevcut_durum
+        FROM makaleler m
+        JOIN kullanicilar k ON m.yukleyen_kullanici_id = k.id
+        WHERE k.kullanici_adi = %s;
+        """
+
+        self.cursor.execute(query, (self.username,))
+        author_articles = self.cursor.fetchall()
+
+        if not author_articles:
+            self.show_message("Henüz makale eklenmemiştir.")
+        else:
+            message = "Eklenen Makaleler:\n"
+            for article in author_articles:
+                message += f"ID: {article[0]}\nBaşlık: {article[1]}\nYazar: {article[2]}\nİçerik: {article[3]}\nDurum: {article[4]}\n\n"
+            # Instead of using QMessageBox, create a new dialog to show the articles
+            article_list_dialog = ArticleListDialog(message)
+            article_list_dialog.exec_()
+
+#düzendeki araçları(widget) temizleyen metod
+    def clear_layout(self):
+        for i in reversed(range(self.layout.count())):
+            widget = self.layout.itemAt(i).widget()
+            if widget is not None:
+                widget.setParent(None)
+
+#makaleyi yükleyen metod
+    def upload_article(self):
+        title = self.edit_title.text()
+        author_names = self.edit_author_names.text()
+        author_email = self.edit_author_email.text()
+        author_institution = self.edit_author_institution.text()
+        content = self.edit_content.toPlainText()
+        # Check if any required field is empty
+        if not (title and author_names and author_email and author_institution and content):
+            self.show_message("Lütfen tüm alanları doldurun.")
+            return
+        if not self.validate_email(author_email):
+            self.show_message("Geçersiz e-posta formatı.")
+            return
+
+        add_article_query = """
+        INSERT INTO makaleler (baslik, yazar_ad_soyad, yazar_email, yazar_kurum, makale_icerik, yukleyen_kullanici_id)
+        VALUES (%s, %s, %s, %s, %s, (SELECT id FROM kullanicilar WHERE kullanici_adi = %s));
+        """
+        article_data = (title, author_names, author_email, author_institution, content, self.username)
+
+        try:
+            self.cursor.execute(add_article_query, article_data)
+            self.cnx.commit()
+            # Show a message with an additional button to return to the login screen
+            msg_box = QMessageBox(self)
+            msg_box.setText("Makale başarıyla yüklendi.")
+            return_login_button = QPushButton("Giriş Ekranına Dön")
+            return_login_button.clicked.connect(self.show_login_screen)
+            msg_box.addButton(return_login_button, QMessageBox.AcceptRole)
+            msg_box.exec_()
+        except mysql.connector.Error as err:
+            print("Makale yükleme hatası:", err)
+
+#mail i doğrulayan metod
+    def validate_email(self, email):
+        # Use regular expression to check if the email contains '@'
+        return '@' in email
+
+#makaleyi yükledikten sonra giriş yapma ekranını gösteren metod
+    def show_login_screen(self):
+        #Düzeni temizleyip ve oturum açma ekranı bileşenlerini ayarlıyorum
+        self.clear_layout()
+
+        elements = [
+            (QLabel('Kullanıcı Adı:'), self.edit_username),
+            (QLabel('Şifre:'), self.edit_password),
+            (QPushButton('Giriş Yap', clicked=self.login), None),
+            (QPushButton('Üye Değil Misiniz?', clicked=self.register), None)
+        ]
+        for element, widget in elements:
+            self.layout.addWidget(element)
+            if widget:
+                self.layout.addWidget(widget)
+
+#editör menüsü
+    def editor_menu(self):
+        self.clear_layout()
+
+        label_choice = QLabel("1. Makale Başlıklarını ve Durumlarını Göster\n2. Makaleye Hakem Ata\n3. Çıkış")
+        self.edit_choice = QLineEdit()
+        self.button_editor_menu = QPushButton('Seçimi Onayla')
+        self.button_editor_menu.clicked.connect(self.handle_editor_menu_choice)
+
+        self.layout.addWidget(label_choice)
+        self.layout.addWidget(self.edit_choice)
+        self.layout.addWidget(self.button_editor_menu)
+
+    # editör menü seçimini ele alan metod
+    def handle_editor_menu_choice(self):
+        choice = self.edit_choice.text()
+
+        if choice == '1':
+            self.list_articles()
+        elif choice == '2':
+            self.assign_referee_to_article()
+        elif choice == '3':
+            sys.exit()
+        else:
+            self.show_message("Geçersiz seçim.")
+
+#makaleleri listeleyen metod
+    def list_articles(self):
+        query = "SELECT id, baslik, yazar_ad_soyad, mevcut_durum FROM makaleler;"
+        self.cursor.execute(query)
+        articles = self.cursor.fetchall()
+
+        if not articles:
+            self.show_message("Makale bulunmamaktadır.")
+        else:
+            message = "Makaleler:\n"
+            for article in articles:
+                message += f"{article[0]}. {article[1]} - Yazar: {article[2]} - Durum: {article[3]}\n"
+            self.show_message(message)
+
+#makaleye hakem atayan metod
+    def assign_referee_to_article(self):
+        self.show_article_titles_and_statuses()
+        article_id, ok = QInputDialog.getInt(self, 'Makale Atama', 'Atanacak makalenin ID\'sini girin:')
+        if ok:
+            referee_id, ok = QInputDialog.getInt(self, 'Makale Atama', 'Atanacak hakemin ID\'sini girin:')
+            if ok:
+                assign_referee_query = "UPDATE makaleler SET mevcut_durum = 'Degerlendirmede' WHERE id = %s;"
+                self.cursor.execute(assign_referee_query, (article_id,))
+                self.cnx.commit()
+                self.show_message("Makaleye hakem atama işlemi başarıyla tamamlandı.")
+
+#makale başlıklarını ve durumlarını gösteren metod
+    def show_article_titles_and_statuses(self):
+        query = "SELECT id, baslik, mevcut_durum FROM makaleler WHERE mevcut_durum = 'Yuklendi';"
+        self.cursor.execute(query)
+        articles = self.cursor.fetchall()
+
+        if not articles:
+            self.show_message("Yüklü makale bulunmamaktadır.")
+        else:
+            message = "Makale Başlıkları ve Durumları:\n"
+            for article in articles:
+                message += f"{article[0]}. {article[1]} - {article[2]}\n"
+            self.show_message(message)
+
+#hakem menüsü
+    def referee_menu(self):
+        self.clear_layout()
+
+        label_choice = QLabel(
+            "1. Atanmış Makale Başlıklarını Göster\n2. Makaleyi Değerlendir (Kabul/Ret)\n3. Çıkış")
+        self.edit_choice = QLineEdit()
+        self.button_referee_menu = QPushButton('Seçimi Onayla')
+        self.button_referee_menu.clicked.connect(self.handle_referee_menu_choice)
+
+        self.layout.addWidget(label_choice)
+        self.layout.addWidget(self.edit_choice)
+        self.layout.addWidget(self.button_referee_menu)
+
+#hakem menü seçimini ele alan metod
+    def handle_referee_menu_choice(self):
+        choice = self.edit_choice.text()
+
+        if choice == '1':
+            self.show_assigned_article_titles()
+        elif choice == '2':
+            self.evaluate_article()
+        elif choice == '3':
+            sys.exit()
+        else:
+            print("Geçersiz seçim.")
+
+#atanmış makale başlıklarını gösteren metod
+    def show_assigned_article_titles(self):
+        # Yazarın kullanıcı adını UI üzerinden alın
+        hakem_username, ok = QInputDialog.getText(self, 'Atanmış Makale Başlıkları', 'Makaleyi Yükleyen Yazarın Kullanıcı adını giriniz:')
+        if not ok:
+            return  #
+        query = """
+        SELECT m.id, m.baslik, m.mevcut_durum
+        FROM makaleler m
+        JOIN kullanicilar k ON m.yukleyen_kullanici_id = k.id
+        WHERE m.mevcut_durum = 'Degerlendirmede' AND k.kullanici_adi = %s;
+        """
+
+        self.cursor.execute(query, (hakem_username,))
+        assigned_articles = self.cursor.fetchall()
+
+        if not assigned_articles:
+            self.show_message("Atanmış makale bulunmamaktadır.")
+        else:
+            message = "Atanmış Makale Başlıkları:\n"
+            for article in assigned_articles:
+                message += f"{article[0]}. {article[1]} - Durum: {article[2]}\n"
+            self.show_message(message)
+
+#makaleyi değerlendirin metod
+    def evaluate_article(self):
+        # hakemin girdisinden makale kimliğini alma
+        article_id, ok = QInputDialog.getInt(self, 'Makale Değerlendirme',
+                                             'Değerlendireceğiniz makalenin ID\'sini girin:')
+        if not ok:
+            return
+
+        # hakemin girdisinden kararı alma
+        decision, ok = QInputDialog.getText(self, 'Makale Değerlendirme',
+                                            'Makaleyi kabul etmek için "kabul", reddetmek için "ret" yazın:')
+        if not ok:
+            return
+
+        decision = decision.lower()
+
+        if decision == 'kabul':
+            article_status = 'Kabul'
+        elif decision == 'ret':
+            article_status = 'Ret'
+        else:
+            self.show_message("Geçersiz karar. 'kabul' veya 'ret' yazın.")
+            return
+
+        update_article_status_query = "UPDATE makaleler SET mevcut_durum = %s WHERE id = %s;"
+        self.cursor.execute(update_article_status_query, (article_status, article_id))
+        self.cnx.commit()
+
+        self.show_message(f"Makale değerlendirmesi başarıyla tamamlandı. Durum: {article_status}")
+
+def main():
+    app = QApplication(sys.argv)
+    window = ArticleManagementGUI()
+    window.show()
+    sys.exit(app.exec_())
+
+if __name__ == '__main__':
+    main()
